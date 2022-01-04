@@ -14,7 +14,10 @@ This tool is a fast and lightweight scanner for potentially corrupted images, fo
 ## Usage
 
 ```bash
-$ imgdiag
+$ imgdiag -help
+```
+
+```bash
 Usage:
         imgdiag -path SCAN_DIR [OPTIONS]
 Options:
