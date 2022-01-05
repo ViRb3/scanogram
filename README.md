@@ -19,7 +19,7 @@ Currently, the following formats are supported:
 $ ./scanogram --help
 ```
 
-```bash
+```
 Usage: scanogram <scan-path>
 
 Scan your images for problems and sort everything by date.
