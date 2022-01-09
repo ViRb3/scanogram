@@ -224,7 +224,7 @@ func (f *FileProcessor) Run() error {
 					return errors.WithMessage(err, "move invalid file")
 				}
 			}
-			return errors.New("failed to parse")
+			return errors.WithMessage(err, "failed to parse")
 		}
 	}
 	if CLI.SortPath != "" {
