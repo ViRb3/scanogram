@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,17 +31,59 @@ var CLI struct {
 	Hidden       bool   `default:"false" help:"Process hidden files and directories."`
 	Json         bool   `default:"false" help:"Log in JSON instead of pretty printing."`
 	Verbose      bool   `short:"v" default:"false" help:"Verbose logging."`
+	LogFile      string `default:"scanogram.log" help:"Verbose log file location. Set to empty to disable."`
+}
+
+type LevelWriter struct {
+	io.Writer
+	level zerolog.Level
+}
+
+func NewLevelWriter(writer io.Writer, level zerolog.Level) *LevelWriter {
+	return &LevelWriter{
+		Writer: writer,
+		level:  level,
+	}
+}
+
+func (w *LevelWriter) WriteLevel(level zerolog.Level, p []byte) (n int, err error) {
+	if level < w.level {
+		return len(p), nil
+	}
+	return w.Write(p)
 }
 
 func main() {
 	kong.Parse(&CLI, kong.Description("Scan your images for problems and sort everything by date."))
 
-	if !CLI.Json {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	var logWriters []io.Writer
+	if CLI.LogFile != "" {
+		safeLogFilePath, err := getFileNameSafe(CLI.LogFile)
+		if err != nil {
+			log.Fatal().Err(err).Str("path", CLI.LogFile).Msg("parse log file location")
+		}
+		CLI.LogFile = safeLogFilePath
+		logFile, err := os.Create(CLI.LogFile)
+		if err != nil {
+			log.Fatal().Err(err).Str("path", CLI.LogFile).Msg("create log file")
+		}
+		logWriters = append(logWriters, NewLevelWriter(logFile, zerolog.DebugLevel))
 	}
-	if !CLI.Verbose {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	var consoleLogLevel zerolog.Level
+	if CLI.Verbose {
+		consoleLogLevel = zerolog.DebugLevel
+	} else {
+		consoleLogLevel = zerolog.InfoLevel
 	}
+	var consoleWriter io.Writer
+	if CLI.Json {
+		consoleWriter = os.Stdout
+	} else {
+		consoleWriter = zerolog.ConsoleWriter{Out: os.Stdout}
+	}
+	logWriters = append(logWriters, NewLevelWriter(consoleWriter, consoleLogLevel))
+	log.Logger = zerolog.New(zerolog.MultiLevelWriter(logWriters...))
+
 	if CLI.InvalidPath != "" {
 		log.Info().Str("path", CLI.InvalidPath).Msg("Will move invalid images")
 	}
@@ -61,11 +104,27 @@ func main() {
 	log.Info().Msg("Done!")
 }
 
-func moveInvalidFile(path string) error {
-	return moveFileSafe(path, filepath.Join(CLI.InvalidPath, filepath.Base(path)))
+func (f *FileProcessor) moveInvalidFileSafe(path string) error {
+	return f.moveFileSafe(path, filepath.Join(CLI.InvalidPath, filepath.Base(path)))
 }
 
-func moveFileSafe(path string, newPath string) error {
+// Moves a file to a new path without replacing any existing files.
+// Check getFileNameSafe.
+func (f *FileProcessor) moveFileSafe(path string, newPath string) error {
+	newSafePath, err := getFileNameSafe(newPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(newSafePath), 0755); err != nil {
+		return errors.WithMessage(err, "make new path")
+	}
+	f.log.Debug().Str("dest", newSafePath).Msg("moving file")
+	return os.Rename(path, newSafePath)
+}
+
+// Generates a new path that will not point to any existing file.
+// The new file name will be suffixed with a number if necessary.
+func getFileNameSafe(newPath string) (string, error) {
 	for i := 0; ; i++ {
 		var suffix string
 		if i == 0 {
@@ -78,12 +137,9 @@ func moveFileSafe(path string, newPath string) error {
 		extension := filepath.Ext(newPath)
 		newSafePath := filepath.Join(dir, base[:len(base)-len(extension)]) + suffix + extension
 		if _, err := os.Stat(newSafePath); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(newSafePath), 0755); err != nil {
-				return errors.WithMessage(err, "make new path")
-			}
-			return os.Rename(path, newSafePath)
+			return newSafePath, nil
 		} else if err != nil {
-			return errors.WithMessage(err, "stat new path")
+			return "", errors.WithMessage(err, "stat new path")
 		}
 	}
 }
@@ -145,7 +201,7 @@ func (f *FileProcessor) Run() error {
 	}
 	if f.d.Size() < 3 {
 		if CLI.InvalidPath != "" {
-			if err := moveInvalidFile(f.path); err != nil {
+			if err := f.moveInvalidFileSafe(f.path); err != nil {
 				return errors.WithMessage(err, "move invalid file")
 			}
 		}
@@ -154,7 +210,7 @@ func (f *FileProcessor) Run() error {
 	parsedFile, err := parser.ParseFile(f.path)
 	if err != nil {
 		if CLI.InvalidPath != "" {
-			if err := moveInvalidFile(f.path); err != nil {
+			if err := f.moveInvalidFileSafe(f.path); err != nil {
 				return errors.WithMessage(err, "move invalid file")
 			}
 		}
@@ -201,7 +257,7 @@ func (f *FileProcessor) sort(parsedFile riimage.MediaContext) error {
 			separateDir = "EXIF"
 		}
 	}
-	if err := moveFileSafe(f.path, filepath.Join(
+	if err := f.moveFileSafe(f.path, filepath.Join(
 		CLI.SortPath,
 		separateDir,
 		fmt.Sprintf("%02d", date.Year()),

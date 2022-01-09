@@ -28,11 +28,12 @@ Arguments:
   <scan-path>    Scan images in this directory.
 
 Flags:
-  -h, --help                   Show context-sensitive help.
-  -i, --invalid-path=STRING    Move invalid (corrupt) images to this directory.
-  -s, --sort-path=STRING       Sort and move images to this directory.
-      --sort-separate          Sort EXIF and mod time separately.
-      --hidden                 Process hidden files and directories.
-      --json                   Log in JSON instead of pretty printing.
-  -v, --verbose                Verbose logging.
+  -h, --help                        Show context-sensitive help.
+  -i, --invalid-path=STRING         Move invalid (corrupt) images to this directory.
+  -s, --sort-path=STRING            Sort and move images to this directory.
+      --sort-separate               Sort EXIF and mod time separately.
+      --hidden                      Process hidden files and directories.
+      --json                        Log in JSON instead of pretty printing.
+  -v, --verbose                     Verbose logging.
+      --log-file="scanogram.log"    Verbose log file location. Set to empty to disable.
 ```
