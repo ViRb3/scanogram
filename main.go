@@ -82,7 +82,7 @@ func main() {
 		consoleWriter = zerolog.ConsoleWriter{Out: os.Stdout}
 	}
 	logWriters = append(logWriters, NewLevelWriter(consoleWriter, consoleLogLevel))
-	log.Logger = zerolog.New(zerolog.MultiLevelWriter(logWriters...))
+	log.Logger = log.Output(zerolog.MultiLevelWriter(logWriters...))
 
 	if CLI.InvalidPath != "" {
 		log.Info().Str("path", CLI.InvalidPath).Msg("Will move invalid files")
