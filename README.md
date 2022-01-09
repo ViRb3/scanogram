@@ -36,7 +36,7 @@ Arguments:
 Flags:
   -h, --help                        Show context-sensitive help.
       --scan-exts=jpg,jpeg,tif,tiff,png,heic,heif,bmp,mp4,mov,mkv,avi,3gp,wmv,mpg,mpeg,...
-                                    Scan only files with these extensions.
+                                    Scan only files with these extensions. Set to empty to scan all.
   -i, --invalid-path=STRING         Move invalid (corrupt) files to this directory.
   -s, --sort-path=STRING            Sort and move files to this directory.
       --sort-separate               Sort EXIF and mod time in separate folders.

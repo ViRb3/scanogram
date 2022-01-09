@@ -24,7 +24,7 @@ import (
 
 var CLI struct {
 	ScanPath     string   `arg:"" help:"Scan files in this directory." type:"existingdir"`
-	ScanExts     []string `default:"jpg,jpeg,tif,tiff,png,heic,heif,bmp,mp4,mov,mkv,avi,3gp,wmv,mpg,mpeg" help:"Scan only files with these extensions."`
+	ScanExts     []string `default:"jpg,jpeg,tif,tiff,png,heic,heif,bmp,mp4,mov,mkv,avi,3gp,wmv,mpg,mpeg" help:"Scan only files with these extensions. Set to empty to scan all."`
 	InvalidPath  string   `short:"i" help:"Move invalid (corrupt) files to this directory." type:"existingdir"`
 	SortPath     string   `short:"s" help:"Sort and move files to this directory." type:"existingdir"`
 	SortSeparate bool     `default:"false" help:"Sort EXIF and mod time in separate folders."`
@@ -97,7 +97,11 @@ func main() {
 	if CLI.SortSeparate {
 		log.Info().Msg("Will sort EXIF and mod time in separate folders")
 	}
-	log.Info().Strs("exts", CLI.ScanExts).Msg("Will scan files with these extensions")
+	if len(CLI.ScanExts) > 0 {
+		log.Info().Strs("exts", CLI.ScanExts).Msg("Will scan files with these extensions")
+	} else {
+		log.Info().Msg("Will scan files with any extensions")
+	}
 
 	log.Info().Str("path", CLI.ScanPath).Msg("Scanning...")
 	if err := doScan(); err != nil {
@@ -157,8 +161,10 @@ func doScan() error {
 		scanExtMap["."+ext] = true
 	}
 	if err := filepath.Walk(CLI.ScanPath, func(path string, d fs.FileInfo, err error) error {
-		if _, ok := scanExtMap[strings.ToLower(filepath.Ext(path))]; !ok && !d.IsDir() {
-			return nil
+		if len(scanExtMap) > 0 {
+			if _, ok := scanExtMap[strings.ToLower(filepath.Ext(path))]; !ok && !d.IsDir() {
+				return nil
+			}
 		}
 		logger := log.With().Str("path", path).Int64("size", d.Size()).Logger()
 		if err := NewFileProcessor(logger, path, d, exifTool).Run(); errors.Is(err, fs.SkipDir) {
