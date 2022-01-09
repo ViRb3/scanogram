@@ -1,19 +1,25 @@
 # scanogram
 
-> Scan your images for problems and sort everything by date.
+> Scan your pictures and videos for corruption, and sort them by EXIF or modification time.
 
 ## Introduction
 
-This tool is a fast and lightweight scanner for potentially corrupted images, for example after disaster recovery of a hard drive. It works by parsing the file structure, and not reading the entire file. This tool can also sort your images based on date, using EXIF where possible and mod time as fallback.
+This tool is a fast and lightweight scanner for potentially corrupted pictures and videos, for example after disaster recovery of a hard drive. It works by parsing the file structure, and not reading the entire file. This tool can also sort your multimedia files based on date, using EXIF where possible and modification time as fallback.
 
-Currently, the following formats are supported:
+The following formats are supported for corruption checking:
 
 - JPEG
 - TIFF
 - PNG
 - HEIC
 
+Sorting by EXIF time uses [exiftool](https://exiftool.org/), so all formats supported by the tool also work here.
+
+Sorting by modification time works on all files.
+
 ## Usage
+
+Make sure you have [exiftool](https://exiftool.org/) installed and added to your PATH (executable by typing `exiftool` in any Terminal).
 
 ```bash
 $ ./scanogram --help
@@ -29,6 +35,7 @@ Arguments:
 
 Flags:
   -h, --help                        Show context-sensitive help.
+      --scan-exts=jpg,tif,...       Scan only files with these extensions.
   -i, --invalid-path=STRING         Move invalid (corrupt) images to this directory.
   -s, --sort-path=STRING            Sort and move images to this directory.
       --sort-separate               Sort EXIF and mod time separately.

@@ -3,8 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/alecthomas/kong"
-	"github.com/dsoprea/go-exif/v2"
-	exifcommon "github.com/dsoprea/go-exif/v2/common"
+	"github.com/barasher/go-exiftool"
 	heicexif "github.com/dsoprea/go-heic-exif-extractor"
 	jpegstructure "github.com/dsoprea/go-jpeg-image-structure"
 	pngstructure "github.com/dsoprea/go-png-image-structure"
@@ -24,14 +23,15 @@ import (
 )
 
 var CLI struct {
-	ScanPath     string `arg:"" help:"Scan images in this directory." type:"existingdir"`
-	InvalidPath  string `short:"i" help:"Move invalid (corrupt) images to this directory." type:"existingdir"`
-	SortPath     string `short:"s" help:"Sort and move images to this directory." type:"existingdir"`
-	SortSeparate bool   `default:"false" help:"Sort EXIF and mod time separately."`
-	Hidden       bool   `default:"false" help:"Process hidden files and directories."`
-	Json         bool   `default:"false" help:"Log in JSON instead of pretty printing."`
-	Verbose      bool   `short:"v" default:"false" help:"Verbose logging."`
-	LogFile      string `default:"scanogram.log" help:"Verbose log file location. Set to empty to disable."`
+	ScanPath     string   `arg:"" help:"Scan files in this directory." type:"existingdir"`
+	ScanExts     []string `default:"jpg,jpeg,tif,tiff,png,heic,heif,bmp,mp4,mov,mkv,avi,3gp,wmv,mpg,mpeg" help:"Scan only files with these extensions."`
+	InvalidPath  string   `short:"i" help:"Move invalid (corrupt) files to this directory." type:"existingdir"`
+	SortPath     string   `short:"s" help:"Sort and move files to this directory." type:"existingdir"`
+	SortSeparate bool     `default:"false" help:"Sort EXIF and mod time in separate folders."`
+	Hidden       bool     `default:"false" help:"Process hidden files and directories."`
+	Json         bool     `default:"false" help:"Log in JSON instead of pretty printing."`
+	Verbose      bool     `short:"v" default:"false" help:"Verbose logging."`
+	LogFile      string   `default:"scanogram.log" help:"Verbose log file location. Set to empty to disable."`
 }
 
 type LevelWriter struct {
@@ -54,7 +54,7 @@ func (w *LevelWriter) WriteLevel(level zerolog.Level, p []byte) (n int, err erro
 }
 
 func main() {
-	kong.Parse(&CLI, kong.Description("Scan your images for problems and sort everything by date."))
+	kong.Parse(&CLI, kong.Description("Scan your pictures and videos for corruption, and sort them by EXIF or modification time."))
 
 	var logWriters []io.Writer
 	if CLI.LogFile != "" {
@@ -85,17 +85,18 @@ func main() {
 	log.Logger = zerolog.New(zerolog.MultiLevelWriter(logWriters...))
 
 	if CLI.InvalidPath != "" {
-		log.Info().Str("path", CLI.InvalidPath).Msg("Will move invalid images")
+		log.Info().Str("path", CLI.InvalidPath).Msg("Will move invalid files")
 	}
 	if CLI.SortPath != "" {
-		log.Info().Str("path", CLI.SortPath).Msg("Will sort images")
+		log.Info().Str("path", CLI.SortPath).Msg("Will sort files")
 	}
 	if CLI.Hidden {
 		log.Info().Msg("Will process hidden files and directories")
 	}
 	if CLI.SortSeparate {
-		log.Info().Msg("Will sort EXIF and mod time separately")
+		log.Info().Msg("Will sort EXIF and mod time in separate folders")
 	}
+	log.Info().Strs("exts", CLI.ScanExts).Msg("Will scan files with these extensions")
 
 	log.Info().Str("path", CLI.ScanPath).Msg("Scanning...")
 	if err := doScan(); err != nil {
@@ -145,9 +146,21 @@ func getFileNameSafe(newPath string) (string, error) {
 }
 
 func doScan() error {
+	exifTool, err := exiftool.NewExiftool()
+	if err != nil {
+		return errors.WithMessage(err, "init exiftool")
+	}
+	defer exifTool.Close()
+	scanExtMap := map[string]bool{}
+	for _, ext := range CLI.ScanExts {
+		scanExtMap["."+ext] = true
+	}
 	if err := filepath.Walk(CLI.ScanPath, func(path string, d fs.FileInfo, err error) error {
+		if _, ok := scanExtMap[strings.ToLower(filepath.Ext(path))]; !ok && !d.IsDir() {
+			return nil
+		}
 		logger := log.With().Str("path", path).Int64("size", d.Size()).Logger()
-		if err := NewFileProcessor(logger, path, d).Run(); errors.Is(err, fs.SkipDir) {
+		if err := NewFileProcessor(logger, path, d, exifTool).Run(); errors.Is(err, fs.SkipDir) {
 			return fs.SkipDir
 		} else if err != nil {
 			logger.Err(err).Msg("file error")
@@ -159,14 +172,15 @@ func doScan() error {
 	return nil
 }
 
-func NewFileProcessor(logger zerolog.Logger, path string, d fs.FileInfo) *FileProcessor {
-	return &FileProcessor{logger, path, d}
+func NewFileProcessor(logger zerolog.Logger, path string, d fs.FileInfo, exifTool *exiftool.Exiftool) *FileProcessor {
+	return &FileProcessor{logger, path, d, exifTool}
 }
 
 type FileProcessor struct {
-	log  zerolog.Logger
-	path string
-	d    fs.FileInfo
+	log      zerolog.Logger
+	path     string
+	d        fs.FileInfo
+	exifTool *exiftool.Exiftool
 }
 
 type FileParser interface {
@@ -194,11 +208,6 @@ func (f *FileProcessor) Run() error {
 	if f.d.IsDir() {
 		return nil
 	}
-	parser, detectedType := getFileParser(f.path)
-	if detectedType == "" {
-		f.log.Debug().Msg("failed to detect file type")
-		return nil
-	}
 	if f.d.Size() < 3 {
 		if CLI.InvalidPath != "" {
 			if err := f.moveInvalidFileSafe(f.path); err != nil {
@@ -207,43 +216,35 @@ func (f *FileProcessor) Run() error {
 		}
 		return errors.New("file too small")
 	}
-	parsedFile, err := parser.ParseFile(f.path)
-	if err != nil {
-		if CLI.InvalidPath != "" {
-			if err := f.moveInvalidFileSafe(f.path); err != nil {
-				return errors.WithMessage(err, "move invalid file")
+	parser, detectedType := getFileParser(f.path)
+	if detectedType != "" {
+		if _, err := parser.ParseFile(f.path); err != nil {
+			if CLI.InvalidPath != "" {
+				if err := f.moveInvalidFileSafe(f.path); err != nil {
+					return errors.WithMessage(err, "move invalid file")
+				}
 			}
+			return errors.New("failed to parse")
 		}
-		return errors.New("failed to parse")
 	}
 	if CLI.SortPath != "" {
-		if err := f.sort(parsedFile); err != nil {
+		if err := f.sort(); err != nil {
 			return errors.WithMessage(err, "sort")
 		}
 	}
 	return nil
 }
 
-func (f *FileProcessor) sort(parsedFile riimage.MediaContext) error {
-	rootIfd, _, err := parsedFile.Exif()
-	var date *time.Time
-	var model string
-	if err == nil {
-		date, err = getDate(rootIfd)
-		if err != nil {
-			return errors.WithMessage(err, "get date")
-		}
-		model, err = getModel(rootIfd)
-		if err != nil {
-			return errors.WithMessage(err, "get model")
-		}
-	}
+func (f *FileProcessor) sort() error {
+	fileInfos := f.exifTool.ExtractMetadata(f.path)
+	date := f.getDate(fileInfos)
+	model := f.getModel(fileInfos)
 	usedModTime := false
-	if date == nil || date.Year() == -1 {
+	if date.Year() <= 1 {
 		f.log.Debug().Msg("missing EXIF date")
 		usedModTime = true
 		modTime := f.d.ModTime()
-		date = &modTime
+		date = modTime
 	}
 	if model == "" {
 		f.log.Debug().Msg("missing EXIF model")
@@ -270,32 +271,34 @@ func (f *FileProcessor) sort(parsedFile riimage.MediaContext) error {
 	return nil
 }
 
-type SearchItem struct {
-	*exif.Ifd
-	string
+func (f *FileProcessor) getDate(fileInfos []exiftool.FileMetadata) time.Time {
+	dateRaw := fileInfos[0].Fields["DateTimeOriginal"]
+	if dateRaw == nil {
+		dateRaw = fileInfos[0].Fields["DateTime"]
+	}
+	switch dateRaw.(type) {
+	case string:
+		date, err := time.Parse("2006:01:02 15:04:05", dateRaw.(string))
+		if err == nil {
+			return date
+		}
+	}
+	return time.Time{}
 }
 
-// Returns the IFD's date as a *time.Time, or nil if it does not exist.
-func getDate(rootIfd *exif.Ifd) (*time.Time, error) {
-	var searchList []SearchItem
-	exifIfd, err := rootIfd.ChildWithIfdPath(exifcommon.IfdExifStandardIfdIdentity)
-	if err == nil {
-		searchList = append(searchList, SearchItem{exifIfd, "DateTimeOriginal"})
-	} else if !errors.Is(err, exif.ErrTagNotFound) {
-		return nil, err
+func (f *FileProcessor) getModel(fileInfos []exiftool.FileMetadata) string {
+	makeRaw := fileInfos[0].Fields["Make"]
+	modelRaw := fileInfos[0].Fields["Model"]
+	var model []string
+	switch makeRaw.(type) {
+	case string:
+		model = append(model, makeRaw.(string))
 	}
-	searchList = append(searchList, SearchItem{rootIfd, "DateTime"})
-	for _, item := range searchList {
-		value, err := getTagString(item.Ifd, item.string)
-		if err != nil {
-			return nil, err
-		}
-		if value != "" {
-			date, err := exif.ParseExifFullTimestamp(value)
-			return &date, err
-		}
+	switch modelRaw.(type) {
+	case string:
+		model = append(model, modelRaw.(string))
 	}
-	return nil, nil
+	return cleanText(strings.Join(model, " "))
 }
 
 // Strips any non-ASCII characters from the input string.
@@ -312,39 +315,6 @@ func cleanText(input string) string {
 func cleanFileName(input string) string {
 	var invalidFilenameChars = regexp.MustCompile(`[/\\?%*:|"<>]`)
 	return invalidFilenameChars.ReplaceAllLiteralString(strings.TrimSpace(input), "")
-}
-
-// Returns the IFD's model tag as a string, or an empty string if it does not exist.
-func getModel(rootIfd *exif.Ifd) (string, error) {
-	exifMake, err := getTagString(rootIfd, "Make")
-	if err != nil {
-		return "", err
-	}
-	exifModel, err := getTagString(rootIfd, "Model")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(exifMake + " " + exifModel), nil
-}
-
-// Returns the tag's value as a string, or an empty string if it does not exist.
-func getTagString(rootIfd *exif.Ifd, tagName string) (string, error) {
-	tags, err := rootIfd.FindTagWithName(tagName)
-	if errors.Is(err, exif.ErrTagNotFound) {
-		return "", nil
-	} else if err != nil {
-		return "", err
-	}
-	if len(tags) < 1 {
-		return "", nil
-	} else if len(tags) > 1 {
-		return "", errors.New("more than one EXIF tag matched for " + tagName)
-	}
-	value, err := tags[0].Value()
-	if err != nil {
-		return "", err
-	}
-	return cleanText(value.(string)), nil
 }
 
 // Returns a FileParser for the input based on its file extension.
