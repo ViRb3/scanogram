@@ -67,6 +67,7 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Str("path", CLI.LogFile).Msg("create log file")
 		}
+		defer logFile.Close()
 		logWriters = append(logWriters, NewLevelWriter(logFile, zerolog.DebugLevel))
 	}
 	var consoleLogLevel zerolog.Level
