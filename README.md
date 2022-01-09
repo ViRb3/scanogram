@@ -35,10 +35,11 @@ Arguments:
 
 Flags:
   -h, --help                        Show context-sensitive help.
-      --scan-exts=jpg,tif,...       Scan only files with these extensions.
-  -i, --invalid-path=STRING         Move invalid (corrupt) images to this directory.
-  -s, --sort-path=STRING            Sort and move images to this directory.
-      --sort-separate               Sort EXIF and mod time separately.
+      --scan-exts=jpg,jpeg,tif,tiff,png,heic,heif,bmp,mp4,mov,mkv,avi,3gp,wmv,mpg,mpeg,...
+                                    Scan only files with these extensions.
+  -i, --invalid-path=STRING         Move invalid (corrupt) files to this directory.
+  -s, --sort-path=STRING            Sort and move files to this directory.
+      --sort-separate               Sort EXIF and mod time in separate folders.
       --hidden                      Process hidden files and directories.
       --json                        Log in JSON instead of pretty printing.
   -v, --verbose                     Verbose logging.
