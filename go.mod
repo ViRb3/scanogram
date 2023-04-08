@@ -3,7 +3,7 @@ module scanogram
 go 1.17
 
 require (
-	github.com/alecthomas/kong v0.3.0
+	github.com/alecthomas/kong v0.7.1
 	github.com/barasher/go-exiftool v1.8.0
 	github.com/dsoprea/go-heic-exif-extractor v0.0.0-20210512044107-62067e44c235
 	github.com/dsoprea/go-jpeg-image-structure v0.0.0-20210512043942-b434301c6836
