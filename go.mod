@@ -11,7 +11,7 @@ require (
 	github.com/dsoprea/go-tiff-image-structure v0.0.0-20210512044046-dc78da6a809b
 	github.com/dsoprea/go-utility v0.0.0-20200717064901-2fccff4aa15e
 	github.com/pkg/errors v0.9.1
-	github.com/rs/zerolog v1.29.0
+	github.com/rs/zerolog v1.29.1
 )
 
 require (
